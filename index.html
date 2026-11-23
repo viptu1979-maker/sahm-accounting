@@ -122,6 +122,9 @@ label .req{color:var(--brickink)}
 .items td{padding:6px 4px;vertical-align:top}
 .items input,.items select{min-height:42px;padding:6px 8px}
 .items input[type=checkbox]{width:22px;height:22px;min-height:0;padding:0;accent-color:var(--brick)}
+.pick{position:fixed;z-index:60;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;box-shadow:0 14px 36px rgb(0 0 0/.2);overflow:auto;padding:4px}
+.pick[hidden]{display:none}.pi{padding:8px 10px;border-radius:7px;cursor:pointer;display:grid;gap:1px}.pi b{font-weight:600;font-size:15px}.pi span{font-size:12.5px;color:var(--mute)}
+.pi.on,.pi:hover{background:var(--soft)}.pi.on{outline:2px solid color-mix(in srgb,var(--brick) 45%,transparent)}.pe{padding:10px;color:var(--mute);font-size:14px}
 .items small{display:block;font-size:12px;color:var(--mute);margin-top:3px}.items small.low{color:var(--brickink);font-weight:600}
 .edfoot{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;margin-top:14px}
 @media(max-width:700px){.edfoot{grid-template-columns:minmax(0,1fr)}}
@@ -292,7 +295,7 @@ function printDoc(html,name){const w=window.open('','_blank');if(!w){download(na
 /* ---------- واجهة عامة ---------- */
 let tt;function toast(m,err){const t=$('#toast');t.textContent=m;t.className='on'+(err?' err':'');clearTimeout(tt);tt=setTimeout(()=>t.className='',2600)}
 function modal(html,wide){const m=$('#modal');m.innerHTML=`<div class="box ${wide?'wide':''}" role="dialog" aria-modal="true">${html}</div>`;m.hidden=false;m.scrollTop=0;document.body.classList.add('lock')}
-function closeModal(){const m=$('#modal');m.hidden=true;m.innerHTML='';ED=null;JE=null;BACK=null;document.body.classList.remove('lock')}
+function closeModal(){pickClose();const m=$('#modal');m.hidden=true;m.innerHTML='';ED=null;JE=null;BACK=null;document.body.classList.remove('lock')}
 function ask(msg,yes,label){const a=$('#ask');a.innerHTML=`<div class="box" role="alertdialog"><p style="margin:0 0 18px">${esc(msg)}</p><div class="acts"><button class="btn" id="ask-y">${esc(label||'تأكيد')}</button><button class="btn ghost" id="ask-n">تراجع</button></div></div>`;a.hidden=false;$('#ask-y').focus();$('#ask-y').onclick=()=>{a.hidden=true;yes()};$('#ask-n').onclick=()=>a.hidden=true}
 const mh=t=>`<header class="mh"><h2>${t}</h2><button class="x" data-act="close" aria-label="إغلاق">×</button></header>`;
 function tbl(heads,rows,foot,cls='stack'){if(!rows.length)return'';return`<div class="scroll"><table class="${cls}"><thead><tr>${heads.map(h=>`<th class="${h[1]||''}">${h[0]}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody>${foot?`<tfoot>${foot}</tfoot>`:''}</table></div>`}
@@ -425,7 +428,7 @@ function openDoc(col,id,preset,onSaved){const k=DK[col],c=cfg();const d=id?struc
   ED={col,d,isNew:!id,orig,onSaved};drawDoc()}
 function rowHTML(it,i){const {col}=ED,prods=list('products').sort(byName),p=S.products[it.pid];let av='';
   if(p&&p.type!=='service'&&col!=='purchases'){const s=(ED.st[it.pid]||0)+(col==='invoices'?(ED.orig[it.pid]||0):0);av=`<small class="${s<(+it.qty||0)?'low':''}">المتوفر: ${qf(s)} ${esc(p.unit||'')}</small>`}
-  return`<tr><td style="width:210px"><select data-i="${i}" data-f="pid" aria-label="الصنف"><option value="">— وصف حر —</option>${prods.map(x=>`<option value="${x.id}"${x.id===it.pid?' selected':''}>${esc((x.code?x.code+' · ':'')+x.name)}</option>`).join('')}</select>${av}</td>
+  return`<tr><td style="width:260px"><input data-i="${i}" data-f="pq" value="${esc(p?p.name:'')}" placeholder="ابحث بالاسم أو الرمز أو الباركود" autocomplete="off" role="combobox" aria-expanded="false" aria-label="الصنف">${av}</td>
   <td><input data-i="${i}" data-f="name" value="${esc(it.name)}" placeholder="الوصف" aria-label="الوصف"></td><td style="width:90px"><input data-i="${i}" data-f="qty" type="number" step="any" inputmode="decimal" value="${esc(it.qty)}" aria-label="الكمية"></td>
   <td style="width:120px"><input data-i="${i}" data-f="price" type="number" step="any" inputmode="decimal" value="${esc(it.price)}" aria-label="السعر"></td><td style="width:100px"><input data-i="${i}" data-f="disc" type="number" step="any" inputmode="decimal" value="${esc(it.disc||0)}" aria-label="الخصم"></td>
   <td style="width:64px;text-align:center;padding-top:14px"><input type="checkbox" data-i="${i}" data-f="incl" ${it.incl?'checked':''} aria-label="السعر شامل الضريبة"></td><td class="num" id="lt${i}" style="width:110px;padding-top:16px">${fmt(lineNet(it,ED.d.vatRate))}</td><td style="width:50px"><button type="button" class="btn sm ghost" data-act="delRow" data-i="${i}" aria-label="حذف السطر">×</button></td></tr>`}
@@ -444,6 +447,7 @@ $('#modal').addEventListener('input',e=>{if(JE){const el=e.target,d=JE.d;if(el.d
     if(el.id&&el.id.startsWith('j-'))d[el.id.slice(2)]=el.value;return}
   if(!ED)return;const el=e.target,d=ED.d;
   if(el.dataset.i!=null){const i=+el.dataset.i,f=el.dataset.f,it=d.items[i];if(!it)return;
+    if(f==='pq'){if(it.pid){it.pid='';it.incl=false;const sm=el.parentElement.querySelector('small');if(sm)sm.remove()}it.name=el.value;const ni=$(`[data-i="${i}"][data-f="name"]`);if(ni)ni.value=el.value;pickOpen(el);const lt=$('#lt'+i);if(lt)lt.textContent=fmt(lineNet(it,d.vatRate));$('#e-tots').innerHTML=totHTML(d);return}
     if(f==='pid'){it.pid=el.value;const p=S.products[el.value];if(p){it.name=p.name;it.price=+p[DK[ED.col].pk]||0;it.incl=!!+(DK[ED.col].pk==='cost'?p.costIncl:p.priceIncl)}$('#e-rows').innerHTML=d.items.map(rowHTML).join('');const q=$(`[data-i="${i}"][data-f="qty"]`);q&&q.focus()}
     else{if(f==='incl')it.incl=el.checked;else it[f]=el.value;const lt=$('#lt'+i);if(lt)lt.textContent=fmt(lineNet(it,d.vatRate));if(f==='qty'&&it.pid){const sm=el.closest('tr').querySelector('small');if(sm){const s=(ED.st[it.pid]||0)+(ED.col==='invoices'?(ED.orig[it.pid]||0):0);sm.classList.toggle('low',s<(+it.qty||0))}}}
     $('#e-tots').innerHTML=totHTML(d);return}
@@ -482,6 +486,31 @@ function openPay(col,id){const d=S[col][id],r=due(d);
     const nd=structuredClone(d);nd.payments=[...(nd.payments||[]),{date:f.get('date'),amount:amt,method:f.get('method'),ref:f.get('ref')}];
     try{await put(col,id,nd);toast('تم تسجيل الدفعة');openView(col,id)}catch(_){}}}
 
+
+/* ---------- البحث عن الصنف ---------- */
+let PK=null;
+function pickOpen(inp){if(!ED)return;const i=+inp.dataset.i,q=NZ(AD(inp.value)).split(' ').filter(Boolean),st=ED.st,isP=ED.col==='purchases';
+  const all=list('products'),exact=all.find(p=>p.code&&AD(p.code).trim()===AD(inp.value).trim());
+  const res=all.filter(p=>{const h=NZ(AD((p.code||'')+' '+p.name));return q.every(t=>h.includes(t))}).sort((a,b)=>(b===exact)-(a===exact)||(q.every(t=>NZ(b.name).includes(t)))-(q.every(t=>NZ(a.name).includes(t)))||String(a.name).localeCompare(String(b.name),'ar')).slice(0,60);
+  PK={i,res,hi:res.length?0:-1,inp};let box=$('#pick');if(!box){box=document.createElement('div');box.id='pick';box.className='pick';box.setAttribute('role','listbox');document.body.appendChild(box);
+    box.addEventListener('mousedown',e=>{const it=e.target.closest('[data-pick]');e.preventDefault();if(it&&PK)pickChoose(PK.i,it.dataset.pick)})}
+  const r=inp.getBoundingClientRect(),below=innerHeight-r.bottom-12,up=below<220&&r.top>below,mh=Math.min(340,up?r.top-12:below);
+  box.style.cssText=`${up?`bottom:${innerHeight-r.top+4}px`:`top:${r.bottom+4}px`};right:${Math.max(8,innerWidth-r.right)}px;width:${Math.min(Math.max(r.width,380),innerWidth-16)}px;max-height:${mh}px`;
+  box.innerHTML=res.length?res.map((p,k)=>{const svc=p.type==='service',pr=isP?p.cost:p.price,inc=+(isP?p.costIncl:p.priceIncl);const s=svc?'':' · المتوفر '+qf((st[p.id]||0)+(ED.col==='invoices'?(ED.orig[p.id]||0):0));
+    return`<div class="pi${k===PK.hi?' on':''}" data-pick="${p.id}" role="option"><b>${esc(p.name)}</b><span>${p.code?esc(p.code)+' · ':''}${fmt(pr)}${inc?' شامل':''}${svc?' · خدمة':s}</span></div>`}).join(''):`<div class="pe">لا يوجد صنف مطابق — سيُكتب «${esc(inp.value)}» كوصف حر</div>`;
+  box.hidden=false;inp.setAttribute('aria-expanded','true')}
+function pickClose(){const b=$('#pick');if(b)b.hidden=true;if(PK&&PK.inp)PK.inp.setAttribute('aria-expanded','false');PK=null}
+function pickHi(d){if(!PK||!PK.res.length)return;PK.hi=(PK.hi+d+PK.res.length)%PK.res.length;const els=document.querySelectorAll('#pick .pi');els.forEach((e,k)=>e.classList.toggle('on',k===PK.hi));els[PK.hi]&&els[PK.hi].scrollIntoView({block:'nearest'})}
+function pickChoose(i,pid){const it=ED&&ED.d.items[i],p=S.products[pid];if(!it||!p)return;pickClose();it.pid=pid;it.name=p.name;it.price=+p[DK[ED.col].pk]||0;it.incl=!!+(DK[ED.col].pk==='cost'?p.costIncl:p.priceIncl);
+  $('#e-rows').innerHTML=ED.d.items.map(rowHTML).join('');$('#e-tots').innerHTML=totHTML(ED.d);const q=$(`[data-i="${i}"][data-f="qty"]`);if(q){q.focus();q.select()}}
+$('#modal').addEventListener('focusin',e=>{const el=e.target;if(ED&&el.dataset.f==='pq'){el.select();pickOpen(el)}});
+$('#modal').addEventListener('focusout',e=>{if(e.target.dataset.f==='pq')setTimeout(()=>{if(PK&&document.activeElement!==PK.inp)pickClose()},120)});
+$('#modal').addEventListener('keydown',e=>{const el=e.target;
+  if(el.dataset.f==='pq'&&ED){if(e.key==='ArrowDown'){e.preventDefault();PK?pickHi(1):pickOpen(el)}else if(e.key==='ArrowUp'){e.preventDefault();pickHi(-1)}else if(e.key==='Escape'){if(PK){e.preventDefault();e.stopPropagation();pickClose()}}
+    else if(e.key==='Enter'){e.preventDefault();const v=AD(el.value).trim(),ex=v&&list('products').find(p=>p.code&&AD(p.code).trim()===v);if(ex)pickChoose(+el.dataset.i,ex.id);else if(PK&&PK.hi>=0&&PK.res[PK.hi])pickChoose(PK.i,PK.res[PK.hi].id);else pickClose()}return}
+  if(ED&&el.dataset.f==='qty'&&e.key==='Enter'){e.preventDefault();const i=+el.dataset.i;if(i===ED.d.items.length-1)ACT.addRow();const n=$(`[data-i="${i+1}"][data-f="pq"]`);n&&n.focus()}});
+addEventListener('scroll',e=>{if(PK&&!(e.target.closest&&e.target.closest('#pick')))pickClose()},true);
+addEventListener('resize',()=>PK&&pickClose());
 /* ---------- النماذج البسيطة ---------- */
 const PF=t=>({t,f:[['name','الاسم',1,'text',1],['vat','الرقم الضريبي'],['cr','السجل التجاري'],['phone','الجوال','','tel'],['email','البريد','','email'],['address','العنوان','','textarea']]});
 const FORMS={customers:PF('عميل'),suppliers:PF('مورد'),
