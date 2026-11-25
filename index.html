@@ -265,8 +265,10 @@ function persist(){try{localStorage.setItem(LS,JSON.stringify(S))}catch(e){}}
 function dbErr(e){const c=e&&e.code;return /permission/.test(c)?'لا تملك صلاحية لهذا الإجراء':/quota/.test(c)?'تجاوزت حصة قاعدة البيانات':/resource/.test(c)?'طلبات كثيرة، أعد المحاولة بعد لحظات':'تعذّر الحفظ، تحقق من الاتصال وأعد المحاولة'}
 async function put(col,id,data,quiet){const body=JSON.parse(JSON.stringify(data));delete body.id;if(ME){body.updatedAt=new Date().toISOString();body.updatedBy=ME.email}
   if(!db){if(col==='settings')S.settings=body;else S[col][id]={...body,id};persist();schedule();return}
+  if(col==='projects'){col='quotes';body._prj=true}
   for(let a=0;;a++){try{await db.doc(col+'/'+id).set(body);return}catch(e){const c=e&&e.code;if(a<3&&/unavailable|resource/.test(c||'')){await new Promise(r=>setTimeout(r,(/resource/.test(c)?1500:500)*(a+1)+Math.random()*400));continue}if(!quiet)toast(dbErr(e),1);throw e}}}
 async function del(col,id){if(!db){delete S[col][id];persist();schedule();return}
+  if(col==='projects')col='quotes';
   try{await db.doc(col+'/'+id).delete()}catch(e){toast(dbErr(e),1);throw e}}
 function banner(t){$('#banner').textContent=t}
 let ME=null,ROLE='viewer',unsubs=[],USERS={},idleT=null;
@@ -281,10 +283,10 @@ function stopData(){unsubs.forEach(f=>{try{f()}catch(_){}});unsubs=[];COLS.forEa
 function bump(){clearTimeout(idleT);if(ME)idleT=setTimeout(()=>{firebase.auth().signOut();gateMsg('تم تسجيل خروجك تلقائيًا بعد '+(window.IDLE_MINUTES||10)+' دقائق من عدم النشاط.')},(window.IDLE_MINUTES||10)*6e4)}
 ['pointerdown','keydown','scroll','touchstart'].forEach(ev=>addEventListener(ev,bump,{passive:true}));
 function startData(){const timer=setTimeout(()=>{if(mode==='loading')banner('تعذّر الوصول إلى البيانات حتى الآن. تحقق من الاتصال بالإنترنت.')},10000);
-  let left=COLS.length+1;const ready=()=>{if(--left===0){clearTimeout(timer);mode='db';banner('')}};
+  let left=COLS.length;const ready=()=>{if(--left===0){clearTimeout(timer);mode='db';banner('')}};
   const onErr=e=>{clearTimeout(timer);banner('تعذّر تحميل البيانات: '+fbErr(e))};
   let f0=0;unsubs.push(db.doc('settings/main').onSnapshot(s=>{S.settings=s.exists?{...s.data()}:{};if(!f0&&!s.metadata.fromCache){f0=1;ready()}schedule()},onErr));
-  COLS.forEach(c=>{let f=0;unsubs.push(db.collection(c).onSnapshot(q=>{const o={};q.docs.forEach(d=>o[d.id]={...d.data(),id:d.id});S[c]=o;if(c==='projects')PRJ_ERR='';if(!f&&!q.metadata.fromCache){f=1;ready()}schedule()},c==='projects'?e=>{PRJ_ERR=fbErr(e);if(!f){f=1;ready()}schedule()}:onErr))});
+  COLS.filter(c=>c!=='projects').forEach(c=>{let f=0;unsubs.push(db.collection(c).onSnapshot(q=>{const o={},pj={};q.docs.forEach(d=>{const v={...d.data(),id:d.id};if(c==='quotes'&&v._prj)pj[d.id]=v;else o[d.id]=v});S[c]=o;if(c==='quotes')S.projects=pj;if(!f&&!q.metadata.fromCache){f=1;ready()}schedule()},onErr))});
   if(ROLE==='admin')unsubs.push(db.collection('users').onSnapshot(q=>{USERS={};q.docs.forEach(d=>USERS[d.id]={...d.data(),id:d.id});schedule()},()=>{}));
   bump()}
 async function init(){const C=window.FIREBASE_CONFIG||{};showGate();$('#gate-logo').src=DEFAULT_LOGO;
@@ -995,12 +997,11 @@ function pjCalc(d){const L=d.items||[],q=l=>+l.qty||0,M=L.filter(l=>l.kind==='ma
 const pjParty=d=>(S.customers[d.partyId]||d.party||{}).name||'—';
 function vProjects(){const all=list('projects').sort(byDate),rows=all.filter(d=>U.st==='all'||d.status===U.st).filter(d=>match(d.no,d.name,pjParty(d),d.site));
   const won=all.filter(d=>['won','done'].includes(d.status)).map(pjCalc);
-  const body=rows.map(d=>{const c=pjCalc(d);return`<tr class="click" data-act="editPrj" data-id="${d.id}"><td><b>${esc(d.no)}</b></td><td>${esc(d.name)}${d.site?`<div class="hint">${esc(d.site)}</div>`:''}</td><td>${esc(pjParty(d))}</td><td>${esc(d.date)}</td><td class="num">${fmt(c.cost)}</td><td class="num">${fmt(c.net)}</td><td class="num"><span class="${c.profit<0?'up':''}">${fmt(c.profit)}</span></td><td class="num">${pct(c.profit,c.net)}</td><td>${chip(PST[d.status]||PST.study)}${d.quoteNo||d.invoiceNo?`<div class="hint">${esc([d.quoteNo,d.invoiceNo].filter(Boolean).join(' · '))}</div>`:''}</td></tr>`});
-  const foot=rows.length>1?(()=>{const cs=rows.map(pjCalc),n=sum(cs,c=>c.net),p=sum(cs,c=>c.profit);return`<tr><td colspan="4">${rows.length} مشروع</td><td class="num">${fmt(sum(cs,c=>c.cost))}</td><td class="num">${fmt(n)}</td><td class="num">${fmt(p)}</td><td class="num">${pct(p,n)}</td><td></td></tr>`})():'';
+  const body=rows.map(d=>{const c=pjCalc(d);return`<tr class="click" data-act="editPrj" data-id="${d.id}"><td><b>${esc(d.no)}</b></td><td>${esc(d.name)}${d.site?`<div class="hint">${esc(d.site)}</div>`:''}</td><td>${esc(pjParty(d))}</td><td>${esc(d.date)}</td><td class="num">${fmt(c.cost)}</td><td class="num">${fmt(c.net)}</td><td class="num"><span class="${c.profit<0?'up':''}">${fmt(c.profit)}</span></td><td class="num">${pct(c.profit,c.net)}</td><td>${chip(PST[d.status]||PST.study)}${d.quoteNo||d.invoiceNo?`<div class="hint">${esc([d.quoteNo,d.invoiceNo].filter(Boolean).join(' · '))}</div>`:''}</td><td><button class="btn sm ghost" data-act="printPrjId" data-id="${d.id}">طباعة</button></td></tr>`});
+  const foot=rows.length>1?(()=>{const cs=rows.map(pjCalc),n=sum(cs,c=>c.net),p=sum(cs,c=>c.profit);return`<tr><td colspan="4">${rows.length} مشروع</td><td class="num">${fmt(sum(cs,c=>c.cost))}</td><td class="num">${fmt(n)}</td><td class="num">${fmt(p)}</td><td class="num">${pct(p,n)}</td><td></td><td></td></tr>`})():'';
   return`<div class="top"><div><h1>المشاريع</h1><p class="sub">${all.length} مشروع · ربح المشاريع المعتمدة والمنفذة ${fmt(sum(won,c=>c.profit))} ${esc(cfg().cur)}</p></div><button class="btn" data-act="newPrj">+ مشروع جديد</button></div>
-  ${PRJ_ERR?`<div class="banner">تعذّر الوصول لقسم المشاريع (${esc(PRJ_ERR)}). أضف في قواعد Firestore (firestore.rules) قاعدة لمجموعة <b dir="ltr">projects</b> مثل قاعدة <b dir="ltr">quotes</b> تمامًا ثم انشرها.</div>`:''}
   <div class="bar">${search('بحث بالرقم أو اسم المشروع أو العميل')}${seg('st',[['all','الكل'],...Object.entries(PST).map(([k,v])=>[k,v[0]])])}</div>
-  <div class="panel">${tbl([['الرقم'],['المشروع'],['العميل'],['التاريخ'],['التكلفة','num'],['سعر البيع','num'],['الربح','num'],['الهامش','num'],['الحالة']],body,foot)||`<p class="empty">${all.length?'لا نتائج مطابقة.':'احسب أول مشروع: أضف المواد والأجهزة من المخزون، وأجور التركيب والأعمال، فيظهر لك التكلفة والسعر والربح، ثم حوّله إلى عرض سعر.'}</p>`}</div>`}
+  <div class="panel">${tbl([['الرقم'],['المشروع'],['العميل'],['التاريخ'],['التكلفة','num'],['سعر البيع','num'],['الربح','num'],['الهامش','num'],['الحالة'],['']],body,foot)||`<p class="empty">${all.length?'لا نتائج مطابقة.':'احسب أول مشروع: أضف المواد والأجهزة من المخزون، وأجور التركيب والأعمال، فيظهر لك التكلفة والسعر والربح، ثم حوّله إلى عرض سعر.'}</p>`}</div>`}
 let PJ=null;
 function openPrj(id){const c=cfg(),d=id&&S.projects[id]?structuredClone(S.projects[id]):{id:uid(),no:nextNo('projects','PRJ-'),name:'',partyId:'',site:'',date:today(),status:'study',vatRate:+c.vatRate,margin:30,disc:0,notes:'',items:[{kind:'mat',pid:'',name:'',qty:1,cost:0,price:0},{kind:'lab',pid:'',name:'أجور التركيب',qty:1,cost:0,price:0}]};PJ={d,isNew:!(id&&S.projects[id])};drawPrj()}
 function pjRow(l,i){const q=+l.qty||0,n=(f,w,lb)=>`<td style="width:${w}px"><input data-p="${i}" data-pf="${f}" type="number" step="any" inputmode="decimal" value="${esc(l[f])}" aria-label="${lb}"></td>`;
@@ -1019,7 +1020,7 @@ function drawPrj(){const d=PJ.d,cs=list('customers').sort(byName),ad=ROLE==='adm
   <div class="bar mt"><label style="display:flex;gap:8px;align-items:center">هامش الربح %<input type="number" step="any" id="pj-margin" value="${esc(d.margin??30)}" style="width:90px"></label><button type="button" class="btn sm dark" data-act="pjMargin">احسب أسعار البيع من التكلفة</button><span class="hint">يضع سعر البيع لكل بند = التكلفة + الهامش، ويمكنك تعديل أي سعر بعدها.</span></div>
   <div class="edfoot"><label>ملاحظات داخلية<textarea id="pj-notes">${esc(d.notes||'')}</textarea></label><div id="pj-tots">${pjTot()}</div></div>
   ${d.quoteNo||d.invoiceNo?`<p class="hint">${d.quoteNo?'عرض السعر: <b>'+esc(d.quoteNo)+'</b> ':''}${d.invoiceNo?'· الفاتورة: <b>'+esc(d.invoiceNo)+'</b>':''}</p>`:''}
-  <div class="mf"><button class="btn" data-act="savePrj">حفظ</button><button class="btn dark" data-act="pjConv" data-col="quotes">حفظ وتحويل إلى عرض سعر</button><button class="btn ghost" data-act="pjConv" data-col="invoices">حفظ وتحويل إلى فاتورة</button><button class="btn ghost" data-act="printPrj">طباعة دراسة التكلفة</button><button class="btn ghost" data-act="close">إغلاق</button>${!PJ.isNew&&ad?`<button class="btn danger" data-act="delPrj" data-id="${d.id}" style="margin-inline-start:auto">حذف</button>`:''}</div>
+  <div class="mf"><button class="btn" data-act="savePrj">حفظ</button><button class="btn ghost" data-act="pjSavePrint">حفظ وطباعة</button><button class="btn dark" data-act="pjConv" data-col="quotes">حفظ وتحويل إلى عرض سعر</button><button class="btn ghost" data-act="pjConv" data-col="invoices">حفظ وتحويل إلى فاتورة</button><button class="btn ghost" data-act="printPrj">طباعة دراسة التكلفة</button><button class="btn ghost" data-act="close">إغلاق</button>${!PJ.isNew&&ad?`<button class="btn danger" data-act="delPrj" data-id="${d.id}" style="margin-inline-start:auto">حذف</button>`:''}</div>
   <p class="hint">دراسة التكلفة داخلية: عرض السعر والفاتورة يُظهران للعميل سعر البيع فقط دون التكلفة والربح.</p>`,true);pjFill()}
 $('#modal').addEventListener('input',e=>{if(!PJ)return;const el=e.target,d=PJ.d;
   if(el.dataset.p!=null){const i=+el.dataset.p,l=d.items[i];if(!l)return;const f=el.dataset.pf;
@@ -1043,6 +1044,8 @@ function pjBody(d){const s=cfg(),c=pjCalc(d),p=S.customers[d.partyId]||d.party||
   <div class="bx" style="border:0;padding:10px 0 4px"><h4>المواد والأجهزة</h4></div>${tb(true)}<div class="bx" style="border:0;padding:14px 0 4px"><h4>الأعمال والتركيب والمصاريف</h4></div>${tb(false)}
   <div class="bottom"><div></div><table class="sum">${R('تكلفة المواد والأجهزة',fmt(c.mc))}${R('تكلفة الأعمال والتركيب',fmt(c.lc))}${R('<b>إجمالي التكلفة</b>','<b>'+fmt(c.cost)+'</b>')}${+d.disc?R('الخصم',fmt(d.disc)):''}${R('سعر البيع قبل الضريبة',fmt(c.net))}${R('الضريبة '+(+d.vatRate||0)+'%',fmt(c.vat))}${R('الإجمالي للعميل',fmt(c.total)+' '+esc(s.cur),1)}${R('<b>ربح المشروع</b>','<b>'+fmt(c.profit)+'</b> · '+pct(c.profit,c.net))}</table></div>
   ${d.notes?`<div class="ft"><b>ملاحظات:</b> ${esc(d.notes)}</div>`:''}</div>`}
+async function pjSavePrint(){const w=window.open('','_blank');if(w)w.document.write('<p style="font-family:Tahoma;text-align:center;margin-top:40px">جارٍ التجهيز…</p>');const d=PJ.d;if(!await savePrj(1)){w&&w.close();return}const html=fullDoc('دراسة تكلفة '+d.no,pjBody(S.projects[d.id]||d));toast('حُفظ المشروع');closeModal();
+  if(!w){download(fname('دراسة-تكلفة-'+d.no)+'.html',html);return}w.document.open();w.document.write(html.replace('</body>','<script>setTimeout(function(){print()},800)<\/script></body>'));w.document.close()}
 function printPrj(){if(!PJ)return;const d=PJ.d;printDoc(fullDoc('دراسة تكلفة '+d.no,pjBody(d)),fname('دراسة-تكلفة-'+d.no)+'.html')}
 
 /* ---------- الأوامر ---------- */
@@ -1097,14 +1100,14 @@ const ACT={
     else if(p==='q'){U.from=`${y}-${pad(Math.floor(m/3)*3+1)}-01`;U.to=t}else{U.from=y+'-01-01';U.to=t}schedule()},
   csvDocs:({col})=>{const rows=[['الرقم','التاريخ','العميل','الرقم الضريبي','الصافي','الضريبة','الإجمالي','المدفوع','المتبقي','الحالة']];list(col).sort(byDate).forEach(d=>{const t=totals(d),p=partyOf(col,d);rows.push([d.no,d.date,p.name,p.vat||'',t.net,t.vat,t.total,paid(d),due(d),invSt(d)[0]])});download('الفواتير-'+today()+'.csv',csv(rows))},
   csvProd:()=>{const st=stock(),rows=[['الرمز','الصنف','النوع','الوحدة','التكلفة','سعر البيع','الرصيد','القيمة']];list('products').sort(byName).forEach(p=>rows.push([p.code||'',p.name,p.type==='service'?'خدمة':'مخزني',p.unit||'',+p.cost||0,+p.price||0,p.type==='service'?'':st[p.id],p.type==='service'?'':r2(Math.max(st[p.id],0)*(+p.cost||0))]));download('المخزون-'+today()+'.csv',csv(rows))},
-  newPrj:()=>openPrj(),editPrj:({id})=>openPrj(id),savePrj:()=>savePrj(),printPrj,pjConv,
+  newPrj:()=>openPrj(),editPrj:({id})=>openPrj(id),savePrj:()=>savePrj(),printPrj,pjConv,pjSavePrint,printPrjId:({id})=>{const d=S.projects[id];if(d)printDoc(fullDoc('دراسة تكلفة '+d.no,pjBody(d)),fname('دراسة-تكلفة-'+d.no)+'.html')},
   pjAdd:({k})=>{PJ.d.items.push({kind:k,pid:'',name:'',qty:1,cost:0,price:0});pjFill();const L=document.querySelectorAll(`#pj-${k==='mat'?'mat':'lab'} tr`);const x=L[L.length-1]?.querySelector('select,input');x&&x.focus()},
   pjDel:({i})=>{PJ.d.items.splice(+i,1);pjFill();$('#pj-tots').innerHTML=pjTot()},
   pjMargin:()=>{const m=+PJ.d.margin||0;let n=0;PJ.d.items.forEach(l=>{if(+l.cost){l.price=r2(+l.cost*(1+m/100));n++}});if(!n){toast('أدخل التكاليف أولًا',1);return}pjFill();$('#pj-tots').innerHTML=pjTot();toast('طُبّق هامش '+m+'% على '+n+' بند')},
   delPrj:({id})=>ask('حذف المشروع نهائيًا؟',async()=>{try{await del('projects',id);closeModal();toast('تم الحذف')}catch(_){}},'حذف'),
   exportJson:()=>download('نسخة-احتياطية-'+today()+'.json',JSON.stringify({app:'acct-ledger',v:1,at:new Date().toISOString(),...S},null,1))
 };
-const W_ACT=new Set(['newDoc','editDoc','dupDoc','saveDoc','pay','delPay','voidDoc','convQ','new','edit','adj','quickParty','newJE','saveJE','vatJE','newTk','tkDone','newCt','ctRenew','ctInv','tkInv','autoCodes','newDocFor','newPrj','savePrj','pjConv']),A_ACT=new Set(['delPrj','delTk','delCt','subAcc','delDoc','delRec','delPay','rmLogo','imRun','exportJson','addUser','toggleUser','delJE','newAcc','delAcc']);
+const W_ACT=new Set(['newDoc','editDoc','dupDoc','saveDoc','pay','delPay','voidDoc','convQ','new','edit','adj','quickParty','newJE','saveJE','vatJE','newTk','tkDone','newCt','ctRenew','ctInv','tkInv','autoCodes','newDocFor','newPrj','savePrj','pjConv','pjSavePrint']),A_ACT=new Set(['delPrj','delTk','delCt','subAcc','delDoc','delRec','delPay','rmLogo','imRun','exportJson','addUser','toggleUser','delJE','newAcc','delAcc']);
 document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act,f=ACT[a];if(!f)return;e.preventDefault();
   if(A_ACT.has(a)&&ROLE!=='admin'){toast('هذا الإجراء للمدير فقط',1);return}if(W_ACT.has(a)&&ROLE==='viewer'){toast('صلاحيتك عرض فقط',1);return}f(b.dataset,b)});
 $('#view').addEventListener('input',e=>{const k=e.target.dataset.u;if(k){U[k]=e.target.value;schedule()}});
